@@ -3,6 +3,7 @@ package redis
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
@@ -17,7 +18,12 @@ func (redis *Redis) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 	qname := state.Name()
 	qtype := state.Type()
 
-	zone := redis.findZone(qname)
+	if time.Since(redis.LastZoneUpdate) > zoneUpdateTime {
+		redis.LoadZones()
+	}
+
+	zone := plugin.Zones(redis.Zones).Matches(qname)
+	// fmt.Println("zone : ", zone)
 	if zone == "" {
 		return plugin.NextOrFailure(qname, redis.Next, ctx, w, r)
 	}
@@ -117,10 +123,7 @@ func (redis *Redis) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 			var records *Record
 			if query == CNAMERecord.Host {
 				//this is not the correct zone lets load the correct one
-				qzone := redis.findZone(CNAMERecord.Host)
-				if qzone == "" {
-					continue
-				}
+				qzone := plugin.Zones(redis.Zones).Matches(CNAMERecord.Host)
 				qz := redis.load(qzone)
 				query = strings.TrimSuffix(CNAMERecord.Host, "."+qz.Name)
 				records = redis.get(query, qz)
